@@ -2,89 +2,83 @@ package main
 
 import (
 	"fmt"
-	"net/http"
 	"os"
-	"time"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 const url = "localhost:4000"
 
-type errMsg struct{ err error }
-type httpResponseMsg string
-type statusMessage int
-
-func (e errMsg) Error() string {
-	return e.err.Error()
+type model struct {
+	Tabs       []string
+	TabContent []string
+	activeTab  int
 }
 
-func checkserver() tea.Msg {
-	c := http.Client{Timeout: 10 * time.Second}
-	res, err := c.Get(url)
-	if err != nil {
-		return errMsg{err: err}
-	}
-
-	return statusMessage(res.StatusCode)
-
+func (m model) Init() tea.Cmd {
+	return nil
 }
 
-type Model struct {
-	requestURL string
-	response   string
-	status     statusMessage
-	error      error
-}
-
-func initialModel() Model {
-	return Model{
-		requestURL: "localhost:4000/v1/api",
-		response:   "",
-	}
-}
-
-func (m Model) Init() tea.Cmd {
-	return checkserver
-}
-
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-
-	case statusMessage:
-		m.status = msg
-		return m, tea.Quit
-
-	case errMsg:
-		m.error = msg
-		return m, tea.Quit
 
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
+		case "right", "l", "n", "tab":
+			m.activeTab = min(m.activeTab+1, len(m.Tabs)-1)
+			return m, nil
+		case "left", "h", "p", "shift+tab":
+			m.activeTab = max(m.activeTab-1, 0)
+			return m, nil
 		}
-
 	}
 	return m, nil
 }
 
-func (m Model) View() string {
-	if m.error != nil {
-		return fmt.Sprintf("Could not fetch: %v\n", m.error)
+func (m model) View() string {
+	doc := strings.Builder{}
+
+	var renderedTabs []string
+
+	for i, t := range m.Tabs {
+		var style lipgloss.Style
+		isFirst, isLast, isActive := i == 0, i == len(m.Tabs)-1, i == m.activeTab
+		if isActive {
+			style = activeTabStyle.Copy()
+		} else {
+			style = inactiveTabStyle.Copy()
+		}
+		border, _, _, _, _ := style.GetBorder()
+		if isFirst && isActive {
+			border.BottomLeft = "│"
+		} else if isFirst && !isActive {
+			border.BottomLeft = "├"
+		} else if isLast && isActive {
+			border.BottomRight = "│"
+		} else if isLast && !isActive {
+			border.BottomRight = "┤"
+		}
+		style = style.Border(border)
+		renderedTabs = append(renderedTabs, style.Render(t))
 	}
 
-	s := fmt.Sprintf("Checking url... %s", url)
-
-	if m.status > 0 {
-		s += fmt.Sprintf("%d %s!", m.status, http.StatusText(int(m.status)))
-	}
-
-	return "\n" + s + "\n\n"
+	row := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
+	doc.WriteString(row)
+	doc.WriteString("\n")
+	doc.WriteString(windowStyle.Width((lipgloss.Width(row) - windowStyle.GetHorizontalFrameSize())).Render(m.TabContent[m.activeTab]))
+	return docStyle.Render(doc.String())
 }
 
 func main() {
-	p := tea.NewProgram(initialModel())
+	tabs := []string{"Curl", "Image", "Music"}
+	tabContent := []string{"Curl util", "Img util", "Music util"}
+	m := model{Tabs: tabs, TabContent: tabContent}
+
+	p := tea.NewProgram(m)
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("BlazeMorph terminated due to an error %v", err)
 		os.Exit(1)
